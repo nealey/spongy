@@ -5,23 +5,13 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/nealey/spongy/logfile"
 	"log"
-	"logfile"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
-
-type Message struct {
-	Command    string
-	FullSender string
-	Sender     string
-	Forum      string
-	Args       []string
-	Text       string
-}
 
 var running bool = true
 var nick string
@@ -30,7 +20,7 @@ var maxlogsize uint
 var logq chan Message
 
 func isChannel(s string) bool {
-	if (s == "") {
+	if s == "" {
 		return false
 	}
 
@@ -50,7 +40,7 @@ func (m Message) String() string {
 func logLoop() {
 	logf := logfile.NewLogfile(int(maxlogsize))
 	defer logf.Close()
-	
+
 	for m := range logq {
 		logf.Log(m.String())
 	}
@@ -71,114 +61,6 @@ func nuhost(s string) (string, string, string) {
 	return n, parts[0], parts[1]
 }
 
-func connect(host string, dotls bool) (net.Conn, error) {
-	if dotls {
-		config := &tls.Config{
-			InsecureSkipVerify: true,
-		}
-		return tls.Dial("tcp", host, config)
-	} else {
-		return net.Dial("tcp", host)
-	}
-}
-
-func readLoop(conn net.Conn, inq chan<- string) {
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		inq <- scanner.Text()
-	}
-	close(inq)
-}
-
-func writeLoop(conn net.Conn, outq <-chan string) {
-	for v := range outq {
-		m, _ := parse(v)
-		logq <- m
-		fmt.Fprintln(conn, v)
-	}
-}
-
-func parse(v string) (Message, error) {
-	var m Message
-	var parts []string
-	var lhs string
-
-	parts = strings.SplitN(v, " :", 2)
-	if len(parts) == 2 {
-		lhs = parts[0]
-		m.Text = parts[1]
-	} else {
-		lhs = v
-		m.Text = ""
-	}
-
-	m.FullSender = "."
-	m.Forum = "."
-	m.Sender = "."
-
-	parts = strings.Split(lhs, " ")
-	if parts[0][0] == ':' {
-		m.FullSender = parts[0][1:]
-		parts = parts[1:]
-
-		n, u, _ := nuhost(m.FullSender)
-		if u != "" {
-			m.Sender = n
-		}
-	}
-
-	m.Command = strings.ToUpper(parts[0])
-	switch m.Command {
-	case "PRIVMSG", "NOTICE":
-		switch {
-		case isChannel(parts[1]):
-			m.Forum = parts[1]
-		case m.FullSender == ".":
-			m.Forum = parts[1]
-		default:
-			m.Forum = m.Sender
-		}
-	case "PART", "MODE", "TOPIC", "KICK":
-		m.Forum = parts[1]
-		m.Args = parts[2:]
-	case "JOIN":
-		if len(parts) == 1 {
-			m.Forum = m.Text
-			m.Text = ""
-		} else {
-			m.Forum = parts[1]
-		}
-	case "INVITE":
-		if m.Text != "" {
-			m.Forum = m.Text
-			m.Text = ""
-		} else {
-			m.Forum = parts[2]
-		}
-	case "NICK":
-		if len(parts) > 1 {
-			m.Sender = parts[1]
-			m.Args = parts[2:]
-		} else {
-			m.Sender = m.Text
-			m.Text = ""
-			m.Args = parts[1:]
-		}
-		m.Forum = m.Sender
-	case "353":
-		m.Forum = parts[3]
-	default:
-		numeric, _ := strconv.Atoi(m.Command)
-		if numeric >= 300 {
-			if len(parts) > 2 {
-				m.Forum = parts[2]
-			}
-		}
-		m.Args = parts[1:]
-	}
-
-	return m, nil
-}
 
 func dispatch(outq chan<- string, m Message) {
 	logq <- m
@@ -248,7 +130,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer dir.Close()
-	
+
 	nick := flag.Arg(0)
 	host := flag.Arg(1)
 
@@ -268,7 +150,7 @@ func main() {
 	outq <- fmt.Sprintf("NICK %s", nick)
 	outq <- fmt.Sprintf("USER %s %s %s: %s", nick, nick, nick, gecos)
 	for v := range inq {
-		p, err := parse(v)
+		p, err := Parse(v)
 		if err != nil {
 			continue
 		}
