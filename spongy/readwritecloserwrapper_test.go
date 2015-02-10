@@ -12,7 +12,7 @@ func TestRWCWCat(t *testing.T) {
 	}
 	
 	out := []byte("Hello, World\n")
-	p := make([]byte, 0, 50)
+	p := make([]byte, 50)
 	
 	n, err := proc.Write(out)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestRWCWCat(t *testing.T) {
 	if n != len(out) {
 		t.Errorf("Wrong number of bytes in Read: wanted %d, got %d", len(out), n)
 	}
-	if 0 != bytes.Compare(p, out) {
+	if 0 != bytes.Compare(p[:n], out) {
 		t.Errorf("Mangled read")
 	}
 	
