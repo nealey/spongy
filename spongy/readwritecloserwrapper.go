@@ -3,20 +3,25 @@ package main
 import (
 	"io"
 	"os/exec"
+	"log"
 )
 
-type ReadWriteCloserWrapper {
+type ReadWriteCloserWrapper struct {
 	Reader io.ReadCloser
 	Writer io.WriteCloser
+	cmd *exec.Cmd
 }
 
-def NewReadWriteCloseWrapper(r io.ReadCloser, w io.WriteCloser) *ReadWriteCloserWrapper {
-	return &ReadWriteCloserWrapper{r, w}
+func NewReadWriteCloseWrapper(r io.ReadCloser, w io.WriteCloser) *ReadWriteCloserWrapper {
+	return &ReadWriteCloserWrapper{r, w, nil}
 }
 
-def (w *ReadWriteCloserWrapper) Close() (error) {
+func (w *ReadWriteCloserWrapper) Close() (error) {
 	err1 := w.Reader.Close()
 	err2 := w.Writer.Close()
+	if w.cmd != nil{
+		w.cmd.Wait()
+	}
 	
 	switch {
 	case err1 != nil:
@@ -27,36 +32,43 @@ def (w *ReadWriteCloserWrapper) Close() (error) {
 	return nil
 }
 
-def (w *ReadWriteCloserWrapper) Read(p []byte) (n int, err error) {
-	n, err := w.Reader.Read(p)
+func (w *ReadWriteCloserWrapper) Read(p []byte) (n int, err error) {
+	n, err = w.Reader.Read(p)
 	return
 }
 
-def (w *ReadWriteCloserWrapper) Write(p []byte) (n int, err error) {
-	n, err := w.Writer.Write(p)
+func (w *ReadWriteCloserWrapper) Write(p []byte) (n int, err error) {
+	n, err = w.Writer.Write(p)
 	return
 }
 
-def StartStdioProcess(name string, args []string) (*ReadWriteCloserWrapper, error) {
-	var w ReadWriteCloserWrapper
-	
+func StartStdioProcess(name string, args []string) (w *ReadWriteCloserWrapper, err error) {
+	w = new(ReadWriteCloserWrapper)
+
 	cmd := exec.Command(name, args...)
 	
-	w.Reader, err := cmd.StdoutPipe()
+	if cmd == nil {
+		log.Fatalf("Can't run command: %v %v", name, args)
+	}
+	
+	w.Reader, err = cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
 	
-	w.Writer, err := cmd.StdinPipe()
+	w.Writer, err = cmd.StdinPipe()
 	if err != nil {
+		w.Reader.Close()
 		return nil, err
 	}
 	
 	if err = cmd.Start(); err != nil {
+		w.Reader.Close()
+		w.Writer.Close()
 		return nil, err
 	}
 	
-	go cmd.Wait()
+	w.cmd = cmd
 	
-	return &w, nil
+	return 
 }

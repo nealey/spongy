@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"fmt"
 )
 
 type Message struct {
@@ -14,7 +15,7 @@ type Message struct {
 	Text       string
 }
 
-func Parse(v string) (Message, error) {
+func NewMessage(v string) (Message, error) {
 	var m Message
 	var parts []string
 	var lhs string
@@ -37,7 +38,7 @@ func Parse(v string) (Message, error) {
 		m.FullSender = parts[0][1:]
 		parts = parts[1:]
 
-		n, u, _ := nuhost(m.FullSender)
+		n, u, _ := SplitTarget(m.FullSender)
 		if u != "" {
 			m.Sender = n
 		}
@@ -47,7 +48,7 @@ func Parse(v string) (Message, error) {
 	switch m.Command {
 	case "PRIVMSG", "NOTICE":
 		switch {
-		case isChannel(parts[1]):
+		case IsChannel(parts[1]):
 			m.Forum = parts[1]
 		case m.FullSender == ".":
 			m.Forum = parts[1]
@@ -99,5 +100,34 @@ func Parse(v string) (Message, error) {
 func (m Message) String() string {
 	args := strings.Join(m.Args, " ")
 	return fmt.Sprintf("%s %s %s %s %s :%s", m.FullSender, m.Command, m.Sender, m.Forum, args, m.Text)
+}
+
+
+func SplitTarget(s string) (string, string, string) {
+	var parts []string
+
+	parts = strings.SplitN(s, "!", 2)
+	if len(parts) == 1 {
+		return s, "", ""
+	}
+	nick := parts[0]
+	parts = strings.SplitN(parts[1], "@", 2)
+	if len(parts) == 1 {
+		return s, "", ""
+	}
+	return nick, parts[0], parts[1]
+}
+
+func IsChannel(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	switch s[0] {
+	case '#', '+', '!', '&':
+		return true
+	default:
+		return false
+	}
 }
 

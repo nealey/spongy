@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"github.com/nealey/spongy/logfile"
 	"io"
 	"log"
 	"net"
 	"os"
+	"os/user"
 	"path"
 	"strings"
 	"time"
@@ -42,6 +44,8 @@ func ReadLines(fn string) ([]string, error) {
 type Network struct {
 	running bool
 
+	Nick string
+	
 	basePath string
 
 	conn io.ReadWriteCloser
@@ -50,41 +54,27 @@ type Network struct {
 	outq chan string
 }
 
-func NewNetwork(basePath string) (*Network, error) {
-	nicks, err := ReadLines(path.Join(basePath, "nicks"))
-	if err != nil {
-		return nil, err
-	}
-
-	gecoses, err := ReadLines(path.Join(basePath, "gecos"))
-	if err != nil {
-		return nil, err
-	}
-
-	return &Network{
+func NewNetwork(basePath string) *Network {
+	nw := Network{
 		running: true,
-
 		basePath: basePath,
-
-		servers: servers,
-		nicks:   nicks,
-		gecos:   gecoses[0],
-
 		logq: make(chan Message, 20),
-	}, err
+	}
 	
-	go n.LogLoop()
+	go nw.LogLoop()
+	
+	return &nw
 }
 
-func (n *Network) Close() {
-	n.conn.Close()
-	close(n.logq)
-	close(n.inq)
-	close(n.outq)
+func (nw *Network) Close() {
+	nw.conn.Close()
+	close(nw.logq)
+	close(nw.inq)
+	close(nw.outq)
 }
 
-func (n *Network) WatchOutqDirectory() {
-	outqDirname := path.Join(n.basePath, "outq")
+func (nw *Network) WatchOutqDirectory() {
+	outqDirname := path.Join(nw.basePath, "outq")
 
 	dir, err := os.Open(outqDirname)
 	if err != nil {
@@ -93,18 +83,18 @@ func (n *Network) WatchOutqDirectory() {
 	defer dir.Close()
 	
 	// XXX: Do this with fsnotify
-	for n.running {
+	for nw.running {
 		entities, _ := dir.Readdirnames(0)
 		for _, fn := range entities {
 			pathname := path.Join(outqDirname, fn)
-			n.HandleInfile(pathname)
+			nw.HandleInfile(pathname)
 		}
 		_, _ = dir.Seek(0, 0)
 		time.Sleep(500 * time.Millisecond)
 	}
 }
 
-func (n *Network) HandleInfile(fn string) {
+func (nw *Network) HandleInfile(fn string) {
 	f, err := os.Open(fn)
 	if err != nil {
 		return
@@ -119,91 +109,144 @@ func (n *Network) HandleInfile(fn string) {
 	inf := bufio.NewScanner(f)
 	for inf.Scan() {
 		txt := inf.Text()
-		n.outq <- txt
+		nw.outq <- txt
 	}
 }
 
-func (n *Network) LogLoop() {
-	logf := logfile.NewLogFile(int(maxlogsize))
+func (nw *Network) LogLoop() {
+	logf := logfile.NewLogfile(int(maxlogsize))
 	defer logf.Close()
 	
-	for m := range logq {
+	for m := range nw.logq {
 		logf.Log(m.String())
 	}
 }
 
-func (n *Network) ServerWriteLoop() {
-	for v := range n.outq {
-		m, _ := Parse(v)
-		n.logq <- m
-		fmt.Fprintln(n.conn, v)
+func (nw *Network) ServerWriteLoop() {
+	for v := range nw.outq {
+		m, _ := NewMessage(v)
+		nw.logq <- m
+		fmt.Fprintln(nw.conn, v)
 	}
 }
 
-func (n *Network) ServerReadLoop() {
-	scanner := bufio.NewScanner(conn)
+func (nw *Network) ServerReadLoop() {
+	scanner := bufio.NewScanner(nw.conn)
 	for scanner.Scan() {
-		n.inq <- scanner.Text()
+		nw.inq <- scanner.Text()
 	}
-	close(n.inq)
+	close(nw.inq)
 }
 
-func (n *Network) MessageDispatch() {
-	for line := n.inq {
+func (nw *Network) NextNick() {
+	nicks, err := ReadLines(path.Join(nw.basePath, "nick"))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	
+	// Make up some alternates if they weren't provided
+	if len(nicks) == 1 {
+		nicks = append(nicks, nicks[0] + "_")
+		nicks = append(nicks, nicks[0] + "__")
+		nicks = append(nicks, nicks[0] + "___")
+	}
+	
+	nextidx := 0
+	for idx, n := range nicks {
+		if n == nw.Nick {
+			nextidx = idx + 1
+		}
+	}
+	
+	nw.Nick = nicks[nextidx % len(nicks)]
+	nw.outq <- "NICK " + nw.Nick
+}
+
+func (nw *Network) JoinChannels() {
+	chans, err := ReadLines(path.Join(nw.basePath, "channels"))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	
+	for _, ch := range chans {
+		nw.outq <- "JOIN " + ch
+	}
+}
+
+func (nw *Network) MessageDispatch() {
+	for line := range nw.inq {
 		m, err := NewMessage(line)
 		if err != nil {
 			log.Print(err)
 			continue
 		}
 		
-		n.logq <- m
+		nw.logq <- m
 		// XXX: Add in a handler subprocess call
 		
 		switch m.Command {
 		case "PING":
-			n.outq <- "PONG: " + m.Text
+			nw.outq <- "PONG: " + m.Text
+		case "001":
+			nw.JoinChannels()
 		case "433":
-			nick = nick + "_"
-			outq <- fmt.Sprintf("NICK %s", nick)
+			nw.NextNick()
 		}
 	}
 }
 
-func (n *Network) ConnectToServer(server string) bool {
+func (nw *Network) ConnectToServer(server string) bool {
 	var err error
+	var name string
+
+	names, err := ReadLines(path.Join(nw.basePath, "name"))
+	if err != nil {
+		me, err := user.Current()
+		if err != nil {
+			log.Fatal(err)
+		}
+		name = me.Name
+	} else {
+		name = names[0]
+	}
 
 	switch (server[0]) {
 	case '|':
 		parts := strings.Split(server[1:], " ")
-		n.conn, err = StartStdioProcess(parts[0], parts[1:])
+		nw.conn, err = StartStdioProcess(parts[0], parts[1:])
 	case '^':
-		n.conn, err = net.Dial("tcp", server[1:])
+		nw.conn, err = net.Dial("tcp", server[1:])
 	default:
 		log.Print("Not validating server certificate!")
 		config := &tls.Config{
 			InsecureSkipVerify: true,
 		}
-		n.conn, err = tls.Dial("tcp", host, config)
+		nw.conn, err = tls.Dial("tcp", server, config)
 	}
 	
 	if err != nil {
 		log.Print(err)
-		time.sleep(2 * time.Second)
+		time.Sleep(2 * time.Second)
 		return false
 	}
+	
+	fmt.Fprintf(nw.conn, "USER g g g :%s\n", name)
+	nw.NextNick()
 	
 	return true
 }
 	
 
-func (n *Network) Connect(){
+func (nw *Network) Connect(){
 	serverIndex := 0
-	for n.running {
-		servers, err := ReadLines(path.Join(basePath, "servers"))
+	for nw.running {
+		servers, err := ReadLines(path.Join(nw.basePath, "servers"))
 		if err != nil {
-			serverIndex := 0
+			serverIndex = 0
 			log.Print(err)
-			time.sleep(8)
+			time.Sleep(8)
 			continue
 		}
 		
@@ -213,18 +256,18 @@ func (n *Network) Connect(){
 		server := servers[serverIndex]
 		serverIndex += 1
 		
-		if ! n.ConnectToServer(server) {
+		if ! nw.ConnectToServer(server) {
 			continue
 		}
 		
-		n.inq = make(chan string, 20)
-		n.outq = make(chan string, 20)
+		nw.inq = make(chan string, 20)
+		nw.outq = make(chan string, 20)
 		
-		go n.ServerWriteLoop()
-		go n.MessageDispatch()
-		n.ServerReadLoop()
+		go nw.ServerWriteLoop()
+		go nw.MessageDispatch()
+		nw.ServerReadLoop()
 		
-		close(n.outq)
+		close(nw.outq)
 	}
 }
 
