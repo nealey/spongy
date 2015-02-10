@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/nealey/spongy/logfile"
 	"io"
 	"log"
 	"net"
@@ -39,6 +40,8 @@ func ReadLines(fn string) ([]string, error) {
 }
 
 type Network struct {
+	running bool
+
 	basePath string
 
 	conn io.ReadWriteCloser
@@ -59,19 +62,22 @@ func NewNetwork(basePath string) (*Network, error) {
 	}
 
 	return &Network{
+		running: true,
+
 		basePath: basePath,
 
 		servers: servers,
 		nicks:   nicks,
 		gecos:   gecoses[0],
 
-		logq: make(chan Message),
-		inq:  make(chan string),
-		outq: make(chan string),
+		logq: make(chan Message, 20),
 	}, err
+	
+	go n.LogLoop()
 }
 
 func (n *Network) Close() {
+	n.conn.Close()
 	close(n.logq)
 	close(n.inq)
 	close(n.outq)
@@ -87,7 +93,7 @@ func (n *Network) WatchOutqDirectory() {
 	defer dir.Close()
 	
 	// XXX: Do this with fsnotify
-	for running {
+	for n.running {
 		entities, _ := dir.Readdirnames(0)
 		for _, fn := range entities {
 			pathname := path.Join(outqDirname, fn)
@@ -117,7 +123,16 @@ func (n *Network) HandleInfile(fn string) {
 	}
 }
 
-func (n *Network) WriteLoop() {
+func (n *Network) LogLoop() {
+	logf := logfile.NewLogFile(int(maxlogsize))
+	defer logf.Close()
+	
+	for m := range logq {
+		logf.Log(m.String())
+	}
+}
+
+func (n *Network) ServerWriteLoop() {
 	for v := range n.outq {
 		m, _ := Parse(v)
 		n.logq <- m
@@ -125,7 +140,7 @@ func (n *Network) WriteLoop() {
 	}
 }
 
-func (n *Network) ReadLoop() {
+func (n *Network) ServerReadLoop() {
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
 		n.inq <- scanner.Text()
@@ -133,16 +148,62 @@ func (n *Network) ReadLoop() {
 	close(n.inq)
 }
 
-func 
+func (n *Network) MessageDispatch() {
+	for line := n.inq {
+		m, err := NewMessage(line)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		
+		n.logq <- m
+		// XXX: Add in a handler subprocess call
+		
+		switch m.Command {
+		case "PING":
+			n.outq <- "PONG: " + m.Text
+		case "433":
+			nick = nick + "_"
+			outq <- fmt.Sprintf("NICK %s", nick)
+		}
+	}
+}
+
+func (n *Network) ConnectToServer(server string) bool {
+	var err error
+
+	switch (server[0]) {
+	case '|':
+		parts := strings.Split(server[1:], " ")
+		n.conn, err = StartStdioProcess(parts[0], parts[1:])
+	case '^':
+		n.conn, err = net.Dial("tcp", server[1:])
+	default:
+		log.Print("Not validating server certificate!")
+		config := &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		n.conn, err = tls.Dial("tcp", host, config)
+	}
+	
+	if err != nil {
+		log.Print(err)
+		time.sleep(2 * time.Second)
+		return false
+	}
+	
+	return true
+}
+	
 
 func (n *Network) Connect(){
 	serverIndex := 0
-	for running {
+	for n.running {
 		servers, err := ReadLines(path.Join(basePath, "servers"))
 		if err != nil {
-			log.Print(err)
 			serverIndex := 0
-			time.sleep(2 * time.Second)
+			log.Print(err)
+			time.sleep(8)
 			continue
 		}
 		
@@ -150,18 +211,20 @@ func (n *Network) Connect(){
 			serverIndex = 0
 		}
 		server := servers[serverIndex]
+		serverIndex += 1
 		
-		switch (server[0]) {
-		case '|':
-			
-		
-	if dotls {
-		config := &tls.Config{
-			InsecureSkipVerify: true,
+		if ! n.ConnectToServer(server) {
+			continue
 		}
-		return tls.Dial("tcp", host, config)
-	} else {
-		return net.Dial("tcp", host)
+		
+		n.inq = make(chan string, 20)
+		n.outq = make(chan string, 20)
+		
+		go n.ServerWriteLoop()
+		go n.MessageDispatch()
+		n.ServerReadLoop()
+		
+		close(n.outq)
 	}
 }
 

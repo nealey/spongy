@@ -96,3 +96,8 @@ func Parse(v string) (Message, error) {
 	return m, nil
 }
 
+func (m Message) String() string {
+	args := strings.Join(m.Args, " ")
+	return fmt.Sprintf("%s %s %s %s %s :%s", m.FullSender, m.Command, m.Sender, m.Forum, args, m.Text)
+}
+
