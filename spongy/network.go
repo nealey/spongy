@@ -31,7 +31,6 @@ func ReadLines(fn string) ([]string, error) {
 		line := strings.TrimSpace(scanner.Text())
 		switch {
 		case line == "":
-		case line[0] == '#':
 		default:
 			lines = append(lines, line)
 		}
