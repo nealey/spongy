@@ -64,12 +64,22 @@ func runsvdir(dirname string) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] HOST:PORT\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] BASEPATH\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "BASEPATH is the path to your IRC directory (see README)\n")
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "OPTIONS:\n")
 	flag.PrintDefaults()
 }
 
 func main() {
+	flag.Usage = usage
 	flag.UintVar(&maxlogsize, "logsize", 1000, "Log entries before rotating")
 	flag.Parse()
+	if flag.NArg() != 1 {
+		usage()
+		os.Exit(2)
+	}
+	runsvdir(flag.Arg(0))
 	running = false
 }
