@@ -42,7 +42,7 @@ func (lf *Logfile) rotate() error {
 		return err
 	}
 	
-	currentPath = path.Join(lf.baseDir, "log", "current")
+	currentPath := path.Join(lf.baseDir, "log", "current")
 	
 	if lf.file == nil {
 		// Set lf.file just so we can write out NEXTLOG.
