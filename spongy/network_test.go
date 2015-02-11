@@ -13,8 +13,8 @@ func writeFile(fn string, data string) {
 	ioutil.WriteFile(fn, []byte(data), os.ModePerm)
 }
 
-func createNetwork (t *testing.T) (base string, current string) {
-	base, err := ioutil.TempDir("", "spongy-test")
+func createNetwork (t *testing.T, parent string) (base string, current string) {
+	base, err := ioutil.TempDir(parent, "spongy-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func expect(t *testing.T, fpath string, needle string) {
 }
 
 func TestCreateNetwork(t *testing.T) {
-	base, _ := createNetwork(t)
+	base, _ := createNetwork(t, "")
 	
 	if fi, err := os.Stat(path.Join(base, "nick")); err != nil {
 		t.Error(err)
@@ -66,7 +66,7 @@ func TestCreateNetwork(t *testing.T) {
 }
 
 func TestConnect(t *testing.T) {
-	base, current := createNetwork(t)
+	base, current := createNetwork(t, "")
 	defer os.RemoveAll(base)
 
 	n := NewNetwork(base)

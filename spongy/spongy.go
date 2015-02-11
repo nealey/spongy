@@ -38,11 +38,12 @@ func runsvdir(dirname string) {
 		found := make(map[string]bool)
 		for _, fn := range dn {
 			fpath := path.Join(dirname, fn)
+			log.Print("Considering", fpath)
 			if exists(path.Join(fpath, "down")) {
 				continue
 			}
 			if _, ok := services[fpath]; ! ok {
-				if ! exists(path.Join(fpath, "servers")) {
+				if ! exists(path.Join(fpath, "server")) {
 					continue
 				}
 				
