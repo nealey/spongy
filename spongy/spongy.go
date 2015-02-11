@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 )
 
@@ -28,6 +29,7 @@ func runsvdir(dirname string) {
 	}
 	defer dir.Close()
 	
+	log.Printf("Starting in %s\n", dirname)
 	for running {
 		dn, err := dir.Readdirnames(0); if err != nil {
 			log.Fatal(err)
@@ -44,6 +46,7 @@ func runsvdir(dirname string) {
 					continue
 				}
 				
+				log.Printf("Found new network %s", fpath)
 				newnet := NewNetwork(fpath)
 				services[fpath] = newnet
 				go newnet.Connect()
@@ -54,6 +57,7 @@ func runsvdir(dirname string) {
 		// If anything vanished, disconnect it
 		for fpath, nw := range services {
 			if _, ok := found[fpath]; ! ok {
+				log.Printf("Removing vanished network %s", fpath)
 				nw.Close()
 			}
 		}
@@ -75,11 +79,21 @@ func usage() {
 func main() {
 	flag.Usage = usage
 	flag.UintVar(&maxlogsize, "logsize", 1000, "Log entries before rotating")
+	notime := flag.Bool("notime", false, "Don't timestamp log messages")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		usage()
 		os.Exit(2)
 	}
-	runsvdir(flag.Arg(0))
+	basePath, err := filepath.Abs(flag.Arg(0))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *notime {
+		log.SetFlags(0)
+	}
+	
+	runsvdir(basePath)
+	
 	running = false
 }
