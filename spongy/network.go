@@ -259,6 +259,7 @@ func (nw *Network) Connect(){
 
 		go nw.ServerWriteLoop()
 		go nw.MessageDispatch()
+		go nw.WatchOutqDirectory()
 
 		nw.login()
 		

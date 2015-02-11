@@ -77,6 +77,9 @@ func TestConnect(t *testing.T) {
 	expect(t, current, " 001 ")
 	expect(t, current, " JOIN " + n.Nick + " #SpongyTest")
 	
+	ioutil.WriteFile(path.Join(base, "outq", "merf"), []byte("PART #SpongyTest\n"), os.ModePerm)
+	expect(t, current, " PART ")
+	
 	n.Close()
 	return
 }
