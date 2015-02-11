@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"fmt"
-	"github.com/nealey/spongy/logfile"
 	"io"
 	"log"
 	"net"
@@ -15,8 +14,8 @@ import (
 	"time"
 )
 
-// This gets called a lot.
-// So it's easy to fix stuff while running.
+// This gets called every time the data's needed.
+// That makes it so you can change stuff while running.
 
 func ReadLines(fn string) ([]string, error) {
 	lines := make([]string, 0)
@@ -47,6 +46,7 @@ type Network struct {
 	Nick string
 	
 	basePath string
+	serverIndex int
 
 	conn io.ReadWriteCloser
 	logq chan Message
@@ -67,10 +67,11 @@ func NewNetwork(basePath string) *Network {
 }
 
 func (nw *Network) Close() {
-	nw.conn.Close()
+	nw.running = false
 	close(nw.logq)
-	close(nw.inq)
-	close(nw.outq)
+	if nw.conn != nil {
+		nw.conn.Close()
+	}
 }
 
 func (nw *Network) WatchOutqDirectory() {
@@ -114,7 +115,7 @@ func (nw *Network) HandleInfile(fn string) {
 }
 
 func (nw *Network) LogLoop() {
-	logf := logfile.NewLogfile(int(maxlogsize))
+	logf := NewLogfile(nw.basePath, int(maxlogsize))
 	defer logf.Close()
 	
 	for m := range nw.logq {
@@ -128,14 +129,6 @@ func (nw *Network) ServerWriteLoop() {
 		nw.logq <- m
 		fmt.Fprintln(nw.conn, v)
 	}
-}
-
-func (nw *Network) ServerReadLoop() {
-	scanner := bufio.NewScanner(nw.conn)
-	for scanner.Scan() {
-		nw.inq <- scanner.Text()
-	}
-	close(nw.inq)
 }
 
 func (nw *Network) NextNick() {
@@ -188,7 +181,7 @@ func (nw *Network) MessageDispatch() {
 		
 		switch m.Command {
 		case "PING":
-			nw.outq <- "PONG: " + m.Text
+			nw.outq <- "PONG :" + m.Text
 		case "001":
 			nw.JoinChannels()
 		case "433":
@@ -197,20 +190,17 @@ func (nw *Network) MessageDispatch() {
 	}
 }
 
-func (nw *Network) ConnectToServer(server string) bool {
-	var err error
-	var name string
-
-	names, err := ReadLines(path.Join(nw.basePath, "name"))
+func (nw *Network) ConnectToNextServer() bool {
+	servers, err := ReadLines(path.Join(nw.basePath, "server"))
 	if err != nil {
-		me, err := user.Current()
-		if err != nil {
-			log.Fatal(err)
-		}
-		name = me.Name
-	} else {
-		name = names[0]
+		log.Printf("Couldn't find any servers to connect to in %s", nw.basePath)
+		return false
 	}
+	
+	if nw.serverIndex > len(servers) {
+		nw.serverIndex = 0
+	}
+	server := servers[nw.serverIndex]
 
 	switch (server[0]) {
 	case '|':
@@ -228,45 +218,57 @@ func (nw *Network) ConnectToServer(server string) bool {
 	
 	if err != nil {
 		log.Print(err)
-		time.Sleep(2 * time.Second)
 		return false
 	}
 	
-	fmt.Fprintf(nw.conn, "USER g g g :%s\n", name)
-	nw.NextNick()
-	
 	return true
 }
+
+func (nw *Network) login() {
+	var name string
+
+	names, err := ReadLines(path.Join(nw.basePath, "name"))
+	if err == nil {
+		name = names[0]
+	}
 	
+	if name == "" {
+		me, err := user.Current()
+		if err == nil {
+			name = me.Name
+		}
+	}
+	
+	if name == "" {
+		name = "Charlie"
+	}
+
+	nw.outq <- "USER g g g :" + name
+	nw.NextNick()
+}
+
 
 func (nw *Network) Connect(){
-	serverIndex := 0
 	for nw.running {
-		servers, err := ReadLines(path.Join(nw.basePath, "servers"))
-		if err != nil {
-			serverIndex = 0
-			log.Print(err)
-			time.Sleep(8)
-			continue
-		}
-		
-		if serverIndex > len(servers) {
-			serverIndex = 0
-		}
-		server := servers[serverIndex]
-		serverIndex += 1
-		
-		if ! nw.ConnectToServer(server) {
+		if ! nw.ConnectToNextServer() {
+			time.Sleep(8 * time.Second)
 			continue
 		}
 		
 		nw.inq = make(chan string, 20)
 		nw.outq = make(chan string, 20)
-		
+
 		go nw.ServerWriteLoop()
 		go nw.MessageDispatch()
-		nw.ServerReadLoop()
+
+		nw.login()
 		
+		scanner := bufio.NewScanner(nw.conn)
+		for scanner.Scan() {
+			nw.inq <- scanner.Text()
+		}
+
+		close(nw.inq)
 		close(nw.outq)
 	}
 }

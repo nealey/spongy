@@ -1,20 +1,22 @@
-package logfile
+package main
 
 import (
 	"fmt"
 	"os"
+	"path"
 	"time"
 )
 
 type Logfile struct {
+	baseDir string
 	file *os.File
 	name string
 	nlines int
 	maxlines int
 }
 
-func NewLogfile(maxlines int) (*Logfile) {
-	return &Logfile{nil, "", 0, maxlines}
+func NewLogfile(baseDir string, maxlines int) (*Logfile) {
+	return &Logfile{baseDir, nil, "", 0, maxlines}
 }
 
 func (lf *Logfile) Close() {
@@ -34,7 +36,8 @@ func (lf *Logfile) writeln(s string) error {
 
 func (lf *Logfile) rotate() error {
 	fn := fmt.Sprintf("%s.log", time.Now().UTC().Format(time.RFC3339))
-	newf, err := os.OpenFile(fn, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
+	pathn := path.Join(lf.baseDir, "log", fn)
+	newf, err := os.OpenFile(pathn, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return err
 	}
@@ -58,8 +61,8 @@ func (lf *Logfile) rotate() error {
 	lf.file = newf
 		
 	// Record symlink to new log
-	os.Remove("current")
-	os.Symlink(fn, "current")
+	os.Remove(path.Join(lf.baseDir, "log", "current"))
+	os.Symlink(fn, path.Join(lf.baseDir, "log", "current"))
 	
 	logmsg := fmt.Sprintf(". PREVLOG %s", lf.name)
 	lf.writeln(logmsg)
