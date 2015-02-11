@@ -42,10 +42,12 @@ func (lf *Logfile) rotate() error {
 		return err
 	}
 	
+	currentPath = path.Join(lf.baseDir, "log", "current")
+	
 	if lf.file == nil {
 		// Set lf.file just so we can write out NEXTLOG.
 		// If this fails, that's okay
-		lf.file, _ = os.OpenFile("current", os.O_WRONLY|os.O_APPEND, 0666)
+		lf.file, _ = os.OpenFile(currentPath, os.O_WRONLY|os.O_APPEND, 0666)
 	}
 	
 	if lf.file != nil {
@@ -61,8 +63,8 @@ func (lf *Logfile) rotate() error {
 	lf.file = newf
 		
 	// Record symlink to new log
-	os.Remove(path.Join(lf.baseDir, "log", "current"))
-	os.Symlink(fn, path.Join(lf.baseDir, "log", "current"))
+	os.Remove(currentPath)
+	os.Symlink(fn, currentPath)
 	
 	logmsg := fmt.Sprintf(". PREVLOG %s", lf.name)
 	lf.writeln(logmsg)
