@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"path"
-	"strconv"
+	"github.com/go-fsnotify/fsnotify"
+	"io/ioutil"
 	"os"
+	"path"
+	"strings"
+	"time"
 )
 
 type Network struct {
@@ -14,6 +17,7 @@ type Network struct {
 	lineno int64
 
 	basePath string
+	seq int
 }
 
 type Update struct {
@@ -38,8 +42,10 @@ func (nw *Network) SetPosition(filename string, lineno int64) {
 
 func (nw *Network) Tail(out chan<- *Update) error {
 	if nw.currentLog == "" {
+		var err error
+		
 		currentfn := path.Join(nw.basePath, "log", "current")
-		nw.currentfn, err := os.Readlink(currentfn)
+		nw.currentLog, err = os.Readlink(currentfn)
 		if err != nil {
 			return err
 		}
@@ -58,7 +64,7 @@ func (nw *Network) Tail(out chan<- *Update) error {
 	}
 	defer watcher.Close()
 	
-	watcher.add(filepath)
+	watcher.Add(filepath)
 	
 	for {
 		lines := make([]string, 0)
@@ -70,7 +76,7 @@ func (nw *Network) Tail(out chan<- *Update) error {
 			parts := strings.Split(t, " ")
 			if (len(parts) >= 4) && (parts[2] == "NEXTLOG") {
 				watcher.Remove(filepath)
-				filename = parts[3]
+				filename := parts[3]
 				filepath = path.Join(NetworkDir, filename)
 				f.Close()
 				f, err = os.Open(filepath)
@@ -80,9 +86,9 @@ func (nw *Network) Tail(out chan<- *Update) error {
 				watcher.Add(filepath)
 				nw.lineno = 0
 			}
-			lines = append(lines, t))
+			lines = append(lines, t)
 		}
-		if len(update.Lines) > 0 {
+		if len(lines) > 0 {
 			update := Update{
 				Lines: lines,
 				LastEventId: nw.LastEventId(),
@@ -101,5 +107,12 @@ func (nw *Network) Tail(out chan<- *Update) error {
 	return nil
 }
 
-func (nw *Network) Write(line string) {
-	fn := path.Join(nw.baseDir
+func (nw *Network) Write(data []byte) {
+	epoch := time.Now().Unix()
+	pid := os.Getpid()
+	filename := fmt.Sprintf("%d-%d-%d.txt", epoch, pid, nw.seq)
+	
+	filepath := path.Join(nw.basePath, "outq", filename)
+	ioutil.WriteFile(filepath, data, 0750)
+	nw.seq += 1
+}
