@@ -66,6 +66,7 @@ func (nw *Network) Tail(out chan<- *Update) error {
 	
 	watcher.Add(filepath)
 	
+	// XXX: some way to stop this?
 	for {
 		lines := make([]string, 0)
 		bf := bufio.NewScanner(f)
@@ -77,7 +78,7 @@ func (nw *Network) Tail(out chan<- *Update) error {
 			if (len(parts) >= 4) && (parts[2] == "NEXTLOG") {
 				watcher.Remove(filepath)
 				filename := parts[3]
-				filepath = path.Join(NetworkDir, filename)
+				filepath = path.Join(nw.basePath, "log", filename)
 				f.Close()
 				f, err = os.Open(filepath)
 				if err != nil {
@@ -116,3 +117,30 @@ func (nw *Network) Write(data []byte) {
 	ioutil.WriteFile(filepath, data, 0750)
 	nw.seq += 1
 }
+
+
+func Networks(basePath string) (found []*Network) {
+
+	dir, err := os.Open(basePath)
+	if err != nil {
+		return
+	}
+	defer dir.Close()
+	
+	
+	entities, _ := dir.Readdirnames(0)
+	for _, fn := range entities {
+		netdir := path.Join(basePath, fn)
+		
+		_, err = os.Stat(path.Join(netdir, "nick"))
+		if err != nil {
+			continue
+		}
+		
+		nw := NewNetwork(netdir)
+		found = append(found, nw)
+	}
+	
+	return
+}
+	
