@@ -46,12 +46,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg, err := ReadConfig(h.Dir)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
+		return
 	}
 	
 	// Validate authtok
 	authtok, err := cfg.Get("authtok")
 	if err != nil {
 		http.Error(w, err.Error(), 500)
+		return
 	}
 	if r.FormValue("auth") != authtok {
 		w.Header().Set("Content-Type", "text/plain")
