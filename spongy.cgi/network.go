@@ -12,6 +12,8 @@ import (
 )
 
 type Network struct {
+	running bool
+
 	name string
 	currentLog string
 	lineno int64
@@ -20,19 +22,20 @@ type Network struct {
 	seq int
 }
 
-type Update struct {
-	Lines []string
-	LastEventId string
-}
-
 func NewNetwork(basePath string) (*Network) {
 	return &Network{
+		running: true,
+		name: path.Base(basePath),
 		basePath: basePath,
 	}
 }
 
+func (nw *Network) Close() {
+	nw.running = false
+}
+
 func (nw *Network) LastEventId() string {
-	return fmt.Sprintf("%s:%s:%d", nw.name, nw.currentLog, nw.lineno)
+	return fmt.Sprintf("%s/%s/%d", nw.name, nw.currentLog, nw.lineno)
 }
 
 func (nw *Network) SetPosition(filename string, lineno int64) {
@@ -40,40 +43,56 @@ func (nw *Network) SetPosition(filename string, lineno int64) {
 	nw.lineno = lineno
 }
 
-func (nw *Network) Tail(out chan<- *Update) error {
+func (nw *Network) errmsg(err error) []string {
+	s := fmt.Sprintf("ERROR: %s", err.Error())
+	return []string{s}
+}
+
+func (nw *Network) Tail(out chan<- []string) {
 	if nw.currentLog == "" {
 		var err error
 		
 		currentfn := path.Join(nw.basePath, "log", "current")
 		nw.currentLog, err = os.Readlink(currentfn)
 		if err != nil {
-			return err
+			out <- nw.errmsg(err)
+			return
 		}
 	}
 	
 	filepath := path.Join(nw.basePath, "log", nw.currentLog)
 	f, err := os.Open(filepath)
 	if err != nil {
-		return err
+		out <- nw.errmsg(err)
+		return
 	}
 	defer f.Close()
 	
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return err
+		out <- nw.errmsg(err)
+		return
 	}
 	defer watcher.Close()
 	
 	watcher.Add(filepath)
+	lineno := int64(0)
 	
 	// XXX: some way to stop this?
-	for {
-		lines := make([]string, 0)
+	for nw.running {
 		bf := bufio.NewScanner(f)
+		lines := make([]string, 0)
 		for bf.Scan() {
-			t := bf.Text()
-			nw.lineno += 1
+			lineno += 1
+			if lineno <= nw.lineno {
+				continue
+			} else {
+				nw.lineno = lineno
+			}
 			
+			t := bf.Text()
+			
+			// XXX: Consider omitting PING and PONG
 			parts := strings.Split(t, " ")
 			if (len(parts) >= 4) && (parts[2] == "NEXTLOG") {
 				watcher.Remove(filepath)
@@ -82,30 +101,27 @@ func (nw *Network) Tail(out chan<- *Update) error {
 				f.Close()
 				f, err = os.Open(filepath)
 				if err != nil {
-					return err
+					out <- nw.errmsg(err)
+					return
 				}
 				watcher.Add(filepath)
+				lineno = 0
 				nw.lineno = 0
 			}
 			lines = append(lines, t)
 		}
 		if len(lines) > 0 {
-			update := Update{
-				Lines: lines,
-				LastEventId: nw.LastEventId(),
-			}
-			out <- &update
+			out <- lines
 		}
 		
 		select {
 		case _ = <-watcher.Events:
 			// Somethin' happened!
 		case err := <-watcher.Errors:
-			return err
+			out <- nw.errmsg(err)
+			return
 		}
 	}
-	
-	return nil
 }
 
 func (nw *Network) Write(data []byte) {

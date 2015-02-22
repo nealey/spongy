@@ -35,10 +35,32 @@ func (h Handler) handleCommand(cfg *Config, w http.ResponseWriter, r *http.Reque
 }
 
 func (h Handler) handleTail(cfg *Config, w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "text/event-stream")
 	nws := Networks(cfg.BaseDir)
+	
+	updates := make(chan []string, 100)
+	
 	for _, nw := range nws {
-		fmt.Fprintf(w, "%v\n", nw)
+		go nw.Tail(updates)
+		defer nw.Close()
+	}
+	
+	for lines := range updates {
+		for _, line := range lines {
+			fmt.Fprintf(w, "data: %s\n", line)
+		}
+		
+		ids := make([]string, 0)
+		for _, nw := range nws {
+			ids = append(ids, nw.LastEventId())
+		}
+		idstring := strings.Join(ids, " ")
+		_, err := fmt.Fprintf(w, "id: %s\n\n", idstring)
+		if err != nil {
+			// Can't write anymore, guess they hung up.
+			return
+		}
+		w.(http.Flusher).Flush()
 	}
 }
 
