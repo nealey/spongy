@@ -7,14 +7,17 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
 
+const eventIdSep = "/"
+
 type Network struct {
 	running bool
 
-	name string
+	Name string
 	currentLog string
 	lineno int64
 
@@ -25,7 +28,7 @@ type Network struct {
 func NewNetwork(basePath string) (*Network) {
 	return &Network{
 		running: true,
-		name: path.Base(basePath),
+		Name: path.Base(basePath),
 		basePath: basePath,
 	}
 }
@@ -34,13 +37,25 @@ func (nw *Network) Close() {
 	nw.running = false
 }
 
-func (nw *Network) LastEventId() string {
-	return fmt.Sprintf("%s/%s/%d", nw.name, nw.currentLog, nw.lineno)
+func (nw *Network) ReadLastEventId(lastEventId string) {
+	for _, eventId := range strings.Split(lastEventId, " ") {
+		parts := strings.Split(eventId, eventIdSep)
+		if len(parts) != 3 {
+			continue
+		}
+		
+		if parts[0] != nw.Name {
+			continue
+		}
+		nw.currentLog = parts[1]
+		nw.lineno, _ = strconv.ParseInt(parts[2], 10, 64)
+		return
+	}
 }
 
-func (nw *Network) SetPosition(filename string, lineno int64) {
-	nw.currentLog = filename
-	nw.lineno = lineno
+func (nw *Network) LastEventId() string {
+	parts := []string{nw.Name, nw.currentLog, strconv.FormatInt(nw.lineno, 10)}
+	return strings.Join(parts, eventIdSep)
 }
 
 func (nw *Network) errmsg(err error) []string {

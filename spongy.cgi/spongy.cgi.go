@@ -38,13 +38,15 @@ func (h Handler) handleTail(cfg *Config, w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/event-stream")
 	nws := Networks(cfg.BaseDir)
 	
+	lastEventId := r.FormValue("HTTP_LAST_EVENT_ID")
 	updates := make(chan []string, 100)
 	
 	for _, nw := range nws {
+		nw.ReadLastEventId(lastEventId)
 		go nw.Tail(updates)
 		defer nw.Close()
 	}
-	
+		
 	for lines := range updates {
 		for _, line := range lines {
 			fmt.Fprintf(w, "data: %s\n", line)
