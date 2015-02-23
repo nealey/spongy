@@ -161,6 +161,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(0)
+	log.SetPrefix("Status: 500 CGI Go Boom\nContent-type: text/plain\n\nERROR: ")
 	h := Handler{}
 	if err := cgi.Serve(h); err != nil {
 		log.Fatal(err)
