@@ -174,17 +174,27 @@ func (nw *Network) MessageDispatch() {
 			log.Print(err)
 			continue
 		}
-		
+
 		nw.logq <- m
+		
 		// XXX: Add in a handler subprocess call
 		
 		switch m.Command {
 		case "PING":
 			nw.outq <- "PONG :" + m.Text
+			continue
 		case "001":
 			nw.JoinChannels()
 		case "433":
 			nw.NextNick()
+		case "PRIVMSG":
+			if m.Text == "\001VERSION\001" {
+				//nw.outq <- "NOTICE " + m.Sender + " :\001VERSION Spongy v8294.003.1R6pl58₄SEσ\001"
+				nw.outq <- "NOTICE " + m.Sender + " :\001 VERSION begin 644 version.txt\001"
+				nw.outq <- "NOTICE " + m.Sender + " :\001 VERSION F4W!O;F=Y('9E<G-I;VX@.#(Y-\"XP,#,N,5(V<&PU..*\"A%-%SX,`\001"
+				nw.outq <- "NOTICE " + m.Sender + " :\001 VERSION `\001"
+				nw.outq <- "NOTICE " + m.Sender + " :\001 VERSION end\001"
+			}
 		}
 	}
 }
