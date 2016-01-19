@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"os/exec"
 	"path"
 	"strings"
 	"time"
@@ -48,7 +49,9 @@ type Network struct {
 	serverIndex int
 
 	conn io.ReadWriteCloser
-	logq chan Message
+
+	logf *Logfile
+	
 	inq  chan string
 	outq chan string
 }
@@ -57,23 +60,21 @@ func NewNetwork(basePath string) *Network {
 	nw := Network{
 		running: true,
 		basePath: basePath,
-		logq: make(chan Message, 20),
 	}
-	
-	go nw.LogLoop()
+	nw.logf = NewLogfile(nw.basePath, int(maxlogsize))
 	
 	return &nw
 }
 
 func (nw *Network) Close() {
 	nw.running = false
-	close(nw.logq)
 	if nw.conn != nil {
 		nw.conn.Close()
 	}
+	nw.logf.Close()
 }
 
-func (nw *Network) WatchOutqDirectory() {
+func (nw *Network) watchOutqDirectory() {
 	outqDirname := path.Join(nw.basePath, "outq")
 
 	dir, err := os.Open(outqDirname)
@@ -113,20 +114,12 @@ func (nw *Network) HandleInfile(fn string) {
 	}
 }
 
-func (nw *Network) LogLoop() {
-	logf := NewLogfile(nw.basePath, int(maxlogsize))
-	defer logf.Close()
-	
-	for m := range nw.logq {
-		logf.Log(m.String())
-	}
-}
-
-func (nw *Network) ServerWriteLoop() {
+func (nw *Network) serverWriteLoop() {
 	for v := range nw.outq {
-		m, _ := NewMessage(v)
-		nw.logq <- m
+		debug("» %s", v)
+		nw.logf.Log(v)
 		fmt.Fprintln(nw.conn, v)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -163,20 +156,20 @@ func (nw *Network) JoinChannels() {
 	}
 	
 	for _, ch := range chans {
+		debug("Joining %s", ch)
 		nw.outq <- "JOIN " + ch
 	}
 }
 
-func (nw *Network) MessageDispatch() {
+func (nw *Network) messageDispatchLoop() {
 	for line := range nw.inq {
+		nw.logf.Log(line)
+
 		m, err := NewMessage(line)
 		if err != nil {
 			log.Print(err)
 			continue
 		}
-		
-		nw.logq <- m
-		// XXX: Add in a handler subprocess call
 		
 		switch m.Command {
 		case "PING":
@@ -185,6 +178,30 @@ func (nw *Network) MessageDispatch() {
 			nw.JoinChannels()
 		case "433":
 			nw.NextNick()
+		}
+
+		handlerPath := path.Join(nw.basePath, "handler")
+		cmd := exec.Command(handlerPath, m.Args...)
+		cmd.Env = []string{
+			"command=" + m.Command,
+			"fullsender=" + m.FullSender,
+			"sender=" + m.Sender,
+			"forum=" + m.Forum,
+			"text=" + m.Text,
+			"raw=" + line,
+		}
+		cmd.Stderr = os.Stderr
+		out, err := cmd.Output()
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+
+		if len(out) > 0 {
+			outlines := strings.Split(string(out), "\n")
+			for _, line := range outlines {
+				nw.outq <- line
+			}
 		}
 	}
 }
@@ -201,6 +218,7 @@ func (nw *Network) ConnectToNextServer() bool {
 	}
 	server := servers[nw.serverIndex]
 
+	debug("Connecting to %s", server)
 	switch (server[0]) {
 	case '|':
 		parts := strings.Split(server[1:], " ")
@@ -219,6 +237,7 @@ func (nw *Network) ConnectToNextServer() bool {
 		log.Print(err)
 		return false
 	}
+	debug("Connected")
 	
 	return true
 }
@@ -246,8 +265,15 @@ func (nw *Network) login() {
 	nw.NextNick()
 }
 
+func (nw *Network) keepaliveLoop() {
+	for nw.running {
+		time.Sleep(1 * time.Minute)
+		nw.outq <- "PING :keepalive"
+	}
+}
 
-func (nw *Network) Connect(){
+
+func (nw *Network) Connect() {
 	for nw.running {
 		if ! nw.ConnectToNextServer() {
 			time.Sleep(8 * time.Second)
@@ -257,9 +283,10 @@ func (nw *Network) Connect(){
 		nw.inq = make(chan string, 20)
 		nw.outq = make(chan string, 20)
 
-		go nw.ServerWriteLoop()
-		go nw.MessageDispatch()
-		go nw.WatchOutqDirectory()
+		go nw.serverWriteLoop()
+		go nw.messageDispatchLoop()
+		go nw.watchOutqDirectory()
+		go nw.keepaliveLoop()
 
 		nw.login()
 		

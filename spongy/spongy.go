@@ -11,7 +11,14 @@ import (
 )
 
 var running bool = true
+var verbose bool = false
 var maxlogsize uint
+
+func debug(format string, a ...interface{}) {
+	if verbose {
+		log.Printf(format, a...)
+	}
+}
 
 func exists(filename string) bool {
 	_, err := os.Stat(filename); if err != nil {
@@ -78,8 +85,9 @@ func usage() {
 
 func main() {
 	flag.Usage = usage
-	flag.UintVar(&maxlogsize, "logsize", 1000, "Log entries before rotating")
-	notime := flag.Bool("notime", false, "Don't timestamp log messages")
+	flag.UintVar(&maxlogsize, "logsize", 6000, "Log entries before rotating")
+	flag.BoolVar(&verbose, "verbose", false, "Verbose logging")
+	notime := flag.Bool("notime", false, "Don't timestamp debugging messages")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		usage()
