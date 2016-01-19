@@ -200,7 +200,9 @@ func (nw *Network) messageDispatchLoop() {
 		if len(out) > 0 {
 			outlines := strings.Split(string(out), "\n")
 			for _, line := range outlines {
-				nw.outq <- line
+				if len(line) > 0 {
+					nw.outq <- line
+				}
 			}
 		}
 	}
@@ -244,6 +246,14 @@ func (nw *Network) ConnectToNextServer() bool {
 
 func (nw *Network) login() {
 	var name string
+	var username string
+
+	usernames, err := ReadLines(path.Join(nw.basePath, "username"))
+	if err == nil {
+		username = usernames[0]
+	} else {
+		username = "sponge"
+	}
 
 	names, err := ReadLines(path.Join(nw.basePath, "name"))
 	if err == nil {
@@ -258,10 +268,12 @@ func (nw *Network) login() {
 	}
 	
 	if name == "" {
-		name = "Charlie"
+		// Rogue used "Rodney" if you didn't give it a name.
+		// This one works for the ladies, too.
+		name = "Ronnie"
 	}
 
-	nw.outq <- "USER g g g :" + name
+	nw.outq <- "USER " + username + " g g :" + name
 	nw.NextNick()
 }
 

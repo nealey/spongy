@@ -64,14 +64,6 @@ func (lf *Logfile) processQueue() {
 	lf.file.Close()
 }
 
-func (lf *Logfile) writeln(s string) error {
-	_, err := fmt.Fprintf(lf.file, "%d %s\n", time.Now().Unix(), s)
-	if err == nil {
-		lf.nlines += 1
-	}
-	return err
-}
-
 func (lf *Logfile) rotate() error {
 	fn := fmt.Sprintf("%s.log", time.Now().UTC().Format(time.RFC3339))
 	pathn := path.Join(lf.baseDir, "log", fn)
@@ -83,15 +75,15 @@ func (lf *Logfile) rotate() error {
 	currentPath := path.Join(lf.baseDir, "log", "current")
 	
 	if lf.file == nil {
-		// Set lf.file just so we can write out NEXTLOG.
-		// If this fails, that's okay
+		// Open "current" to append a NEXTLOG line.
+		// If there's no "current", that's okay
 		lf.file, _ = os.OpenFile(currentPath, os.O_WRONLY|os.O_APPEND, 0666)
 	}
 	
 	if lf.file != nil {
 		// Note location of new log
 		logmsg := fmt.Sprintf("NEXTLOG %s", fn)
-		lf.writeln(timestamp(logmsg))
+		fmt.Fprintln(lf.file, timestamp(logmsg))
 		
 		// All done with the current log
 		lf.file.Close()
@@ -105,7 +97,7 @@ func (lf *Logfile) rotate() error {
 	os.Symlink(fn, currentPath)
 	
 	logmsg := fmt.Sprintf("PREVLOG %s", lf.name)
-	lf.writeln(timestamp(logmsg))
+	fmt.Fprintln(lf.file, timestamp(logmsg))
 	
 	lf.name = fn
 	
