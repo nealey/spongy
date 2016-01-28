@@ -3,10 +3,10 @@ package main
 import (
 	"strconv"
 	"strings"
-	"fmt"
 )
 
 type Message struct {
+	Unparsed   string
 	Command    string
 	FullSender string
 	Sender     string
@@ -20,6 +20,7 @@ func NewMessage(v string) (Message, error) {
 	var parts []string
 	var lhs string
 
+	m.Unparsed = v
 	parts = strings.SplitN(v, " :", 2)
 	if len(parts) == 2 {
 		lhs = parts[0]
@@ -98,10 +99,8 @@ func NewMessage(v string) (Message, error) {
 }
 
 func (m Message) String() string {
-	args := strings.Join(m.Args, " ")
-	return fmt.Sprintf("%s %s %s %s %s :%s", m.FullSender, m.Command, m.Sender, m.Forum, args, m.Text)
+	return m.Unparsed
 }
-
 
 func SplitTarget(s string) (string, string, string) {
 	var parts []string
@@ -130,4 +129,3 @@ func IsChannel(s string) bool {
 		return false
 	}
 }
-

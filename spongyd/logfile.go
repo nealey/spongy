@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"log"
 	"path"
 	"time"
 )
@@ -13,25 +14,54 @@ type Logfile struct {
 	name string
 	nlines int
 	maxlines int
+	outq chan string
+}
+
+func timestamp(s string) string {
+	ret := fmt.Sprintf("%d %s", time.Now().Unix(), s)
+	return ret
 }
 
 func NewLogfile(baseDir string, maxlines int) (*Logfile) {
-	return &Logfile{baseDir, nil, "", 0, maxlines}
+	lf := Logfile{baseDir, nil, "", 0, maxlines, make(chan string, 50)}
+	go lf.processQueue();
+	return &lf
 }
 
 func (lf *Logfile) Close() {
 	if lf.file != nil {
-		lf.writeln("EXIT")
-		lf.file.Close()
+		lf.Log("EXIT")
+		close(lf.outq)
 	}
 }
 
-func (lf *Logfile) writeln(s string) error {
-	_, err := fmt.Fprintf(lf.file, "%d %s\n", time.Now().Unix(), s)
-	if err == nil {
+func (lf *Logfile) Log(s string) error {
+	lf.outq <- timestamp(s)
+	return nil
+}
+
+//
+//
+
+func (lf *Logfile) processQueue() {
+	for line := range lf.outq {
+		if (lf.file == nil) || (lf.nlines >= lf.maxlines) {
+			if err := lf.rotate(); err != nil {
+				// Just keep trying, I guess.
+				log.Print(err)
+				continue
+			}
+			lf.nlines = 0
+		}
+
+		if _, err := fmt.Fprintln(lf.file, line); err != nil {
+			log.Print(err)
+			continue
+		}
 		lf.nlines += 1
 	}
-	return err
+
+	lf.file.Close()
 }
 
 func (lf *Logfile) rotate() error {
@@ -45,15 +75,15 @@ func (lf *Logfile) rotate() error {
 	currentPath := path.Join(lf.baseDir, "log", "current")
 	
 	if lf.file == nil {
-		// Set lf.file just so we can write out NEXTLOG.
-		// If this fails, that's okay
+		// Open "current" to append a NEXTLOG line.
+		// If there's no "current", that's okay
 		lf.file, _ = os.OpenFile(currentPath, os.O_WRONLY|os.O_APPEND, 0666)
 	}
 	
 	if lf.file != nil {
 		// Note location of new log
-		logmsg := fmt.Sprintf(". NEXTLOG %s", fn)
-		lf.writeln(logmsg)
+		logmsg := fmt.Sprintf("NEXTLOG %s", fn)
+		fmt.Fprintln(lf.file, timestamp(logmsg))
 		
 		// All done with the current log
 		lf.file.Close()
@@ -66,27 +96,10 @@ func (lf *Logfile) rotate() error {
 	os.Remove(currentPath)
 	os.Symlink(fn, currentPath)
 	
-	logmsg := fmt.Sprintf(". PREVLOG %s", lf.name)
-	lf.writeln(logmsg)
+	logmsg := fmt.Sprintf("PREVLOG %s", lf.name)
+	fmt.Fprintln(lf.file, timestamp(logmsg))
 	
 	lf.name = fn
-	
-	return nil
-}
-
-func (lf *Logfile) Log(s string) error {
-	if lf.file == nil {
-		lf.rotate()
-	}
-	
-	err := lf.writeln(s)
-	if err == nil {
-		return err
-	}
-
-	if lf.nlines >= lf.maxlines {
-		return lf.rotate()
-	}
 	
 	return nil
 }
