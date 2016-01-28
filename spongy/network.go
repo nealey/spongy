@@ -236,6 +236,12 @@ func (nw *Network) ConnectToNextServer() bool {
 func (nw *Network) login() {
 	var name string
 
+	passwd, err := ReadLines(path.Join(nw.basePath, "passwd"))
+	if err == nil {
+		nw.outq <- "PASS " + passwd[0]
+	}
+
+
 	names, err := ReadLines(path.Join(nw.basePath, "name"))
 	if err == nil {
 		name = names[0]
