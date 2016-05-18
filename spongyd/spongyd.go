@@ -104,4 +104,5 @@ func main() {
 	runsvdir(basePath)
 	
 	running = false
+	log.Print("Exiting for some reason!")
 }

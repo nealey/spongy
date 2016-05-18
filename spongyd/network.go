@@ -191,14 +191,13 @@ func (nw *Network) messageDispatchLoop() {
 
 		handlerPath := path.Join(nw.basePath, "handler")
 		cmd := exec.Command(handlerPath, m.Args...)
-		cmd.Env = []string{
-			"command=" + m.Command,
-			"fullsender=" + m.FullSender,
-			"sender=" + m.Sender,
-			"forum=" + m.Forum,
-			"text=" + m.Text,
-			"raw=" + line,
-		}
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "command=" + m.Command)
+		cmd.Env = append(cmd.Env, "fullsender=" + m.FullSender)
+		cmd.Env = append(cmd.Env, "sender=" + m.Sender)
+		cmd.Env = append(cmd.Env, "forum=" + m.Forum)
+		cmd.Env = append(cmd.Env, "text=" + m.Text)
+		cmd.Env = append(cmd.Env, "raw=" + line)
 		cmd.Stderr = os.Stderr
 		out, err := cmd.Output()
 		if err != nil {
